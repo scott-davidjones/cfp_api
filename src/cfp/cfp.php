@@ -11,7 +11,7 @@
 
 namespace Cfp;
 
-class Cfp
+class CfpApi
 {
     /**
      * CFP API Version
@@ -46,7 +46,7 @@ class Cfp
      * Username and password credentials
      * @var string
      */
-    private $encodedCredentials;
+    private $credentials;
 
     /**
      * Constructor
@@ -59,7 +59,7 @@ class Cfp
      */
     public function __construct($user, $pass, $datafeed, $debug = false, $version = null)
     {
-        $this->encodedCredentials = base64_encode($user.":".$pass);
+        $this->credentials = $user.":".$pass;
         $this->debug = $debug;
         if ($version !== null) {
             $this->version = $version;
@@ -187,31 +187,6 @@ class Cfp
         return $this->makeAPICall($url);
     }
 
-
-    /**
-     * Generates HTTP request headers
-     * 
-     * @param  bool  $new      if true we need a new token
-     * @param  mixed $modified last modified unix timestamp
-     * 
-     * @return array header information
-     */
-    private function generateHeaders($modified)
-    {
-        $header = array();
-        if ($this->token === '') {
-            $header[] = "Authorization: Basic ".$this->encodedCredentials;
-        } else {
-            $header[] = "Authorization: Basic ".$this->token;
-        }
-
-        if ($modified !== false) {
-            $header[] = "If-Modified-Since ".gmdate("D, d M Y H:i:s", $modified)." GMT";
-        }
-        
-        return $header;
-    }
-
     /**
      * makes an API request
      *
@@ -227,14 +202,25 @@ class Cfp
     private function makeAPICall($url, $modified = false)
     {
         $cURL = curl_init($url);
-        curl_setopt($cURL, CURLOPT_HEADER, $this->generateHeaders($modified));
+        if ($this->token === '') {
+            curl_setopt($cURL, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+            curl_setopt($cURL, CURLOPT_USERPWD, $this->credentials);
+        } else {
+            $headers = array();
+            $headers[] = "Authorization: Basic ".$this->token;
+            if ($modified) {
+                $headers[] = "If-Modified-Since ".gmdate("D, d M Y H:i:s", $modified)." GMT";
+            }
+            curl_setopt($cURL, CURLOPT_HEADER, $headers);
+        }
+        
         curl_setopt($cURL, CURLOPT_RETURNTRANSFER, true);
         $result = curl_exec($cURL);
         $info = curl_getinfo($cURL);
         curl_close($cURL);
         //if 401 rerun the call with non-token auth
         if ((int) $info['http_code'] === 401) {
-            $result = $this->makeAPICall($url);
+            $result = $this->makeAPICall($url, $modified);
             $this->token = base64_encode($info['Token']);
         }
         //convert to XML document and return
