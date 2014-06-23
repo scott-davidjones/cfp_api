@@ -64,7 +64,7 @@ class CfpApi
         if ($version !== null) {
             $this->version = $version;
         }
-        $this->baseURL = "http://webservices.vebra.com/export/{$datafeed}/v{$this->version}";
+        $this->baseURL = "http://webservices.vebra.com/export/{$datafeed}/v{$this->apiVersion}";
 
         unset($user, $pass, $datafeed, $debug, $version);
     }
@@ -218,6 +218,9 @@ class CfpApi
         $result = curl_exec($cURL);
         $info = curl_getinfo($cURL);
         curl_close($cURL);
+        if ($this->debug === true) {
+            $this->debugOuput($result);
+        }
         //if 401 rerun the call with non-token auth
         if ((int) $info['http_code'] === 401) {
             $result = $this->makeAPICall($url, $modified);
