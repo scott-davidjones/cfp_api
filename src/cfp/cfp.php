@@ -224,7 +224,7 @@ class CfpApi
             $this->token = base64_encode($info['Token']);
         }
         //convert to XML document and return
-        return new SimpleXMLElement($result);
+        return new \SimpleXMLElement($result);
     }
 
     /**
