@@ -11,7 +11,7 @@
 
 namespace Cfp;
 
-class CfpApi
+class Cfp
 {
     /**
      * CFP API Version
