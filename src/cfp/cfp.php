@@ -125,9 +125,13 @@ class Cfp
      * 
      * @return object SimpleXMLElement
      */
-    public function getPropertyDetails($propertyID)
-    {
-        $propertyURL = $this->propertiesURL."/{$propertyID}";
+    public function getPropertyDetails($propertyID, $url = null)
+    {  
+        if ($url !== null) {
+            $propertyURL = $url;
+        } else {
+            $propertyURL = $this->propertiesURL."/{$propertyID}";
+        }
 
         if ($this->debug === true) {
             $this->debugOuput($propertyURL);
@@ -229,11 +233,6 @@ class Cfp
 
         list($header, $body) = explode("\r\n\r\n", $result, 2);
         $this->checkHeaders($header);
-        
-        if (!is_dir(dirname(__FILE__).'/tmp')) {
-            mkdir(dirname(__FILE__).'/tmp');
-        }
-        file_put_contents(dirname(__FILE__).'/tmp/response_'.time(), $result);
         
         //if 401 throw exception
         if ((int) $info['http_code'] === 401) {
