@@ -11,6 +11,8 @@
 
 namespace Cfp;
 
+session_start();
+
 class Cfp
 {
     /**
@@ -18,11 +20,6 @@ class Cfp
      * @var integer
      */
     public $apiVersion = 7;
-    /**
-     * authentication token
-     * @var string
-     */
-    protected $token = '';
 
     /**
      * URL for API call
@@ -65,7 +62,7 @@ class Cfp
             $this->version = $version;
         }
         $this->baseURL = "http://webservices.vebra.com/export/{$datafeed}/v{$this->apiVersion}";
-
+        
         unset($user, $pass, $datafeed, $debug, $version);
     }
 
@@ -110,9 +107,9 @@ class Cfp
      * 
      * @return object SimpleXMLElement
      */
-    public function getPropertyList()
+    public function getPropertyList($url)
     {
-        $this->propertiesURL = $this->branchURL."/property";
+        $this->propertiesURL = $url."/property";
 
         if ($this->debug === true) {
             $this->debugOuput($this->propertiesURL);
@@ -153,7 +150,7 @@ class Cfp
         $day = date("d", $time);
         $hour = date("H", $time);
         $min = date("i", $time);
-        $sec = date("S", $time);
+        $sec = date("s", $time);
         $url = $this->baseURL."/property/{$year}/{$month}/{$day}/{$hour}/{$min}/{$sec}";
 
         if ($this->debug === true) {
@@ -177,7 +174,7 @@ class Cfp
         $day = date("d", $time);
         $hour = date("H", $time);
         $min = date("i", $time);
-        $sec = date("S", $time);
+        $sec = date("s", $time);
         $url = $this->baseURL."/files/{$year}/{$month}/{$day}/{$hour}/{$min}/{$sec}";
 
         if ($this->debug === true) {
@@ -202,32 +199,113 @@ class Cfp
     private function makeAPICall($url, $modified = false)
     {
         $cURL = curl_init($url);
-        if ($this->token === '') {
+        $headers = array();
+        //do we already have a token
+        //if not normal login
+        $token = $this->getToken();
+        if ($token === false) {
             curl_setopt($cURL, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
             curl_setopt($cURL, CURLOPT_USERPWD, $this->credentials);
         } else {
-            $headers = array();
-            $headers[] = "Authorization: Basic ".$this->token;
-            if ($modified) {
-                $headers[] = "If-Modified-Since ".gmdate("D, d M Y H:i:s", $modified)." GMT";
-            }
-            curl_setopt($cURL, CURLOPT_HEADER, $headers);
+            //token found use token to login
+            $headers[] = "Authorization: Basic ".$token;
         }
-        
+        //if we have a modified time then set header
+        if ($modified !== false) {
+            $headers[] = "If-Modified-Since ".gmdate("D, d M Y H:i:s", $modified)." GMT";
+        }
+
+        curl_setopt($cURL, CURLINFO_HEADER_OUT, true);
+        curl_setopt($cURL, CURLOPT_HEADER, true);
+        curl_setopt($cURL, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($cURL, CURLOPT_RETURNTRANSFER, true);
+        //execute
         $result = curl_exec($cURL);
+        //get response information
         $info = curl_getinfo($cURL);
+        $this->debugOuput($info);
+        $this->debugOuput($result);
         curl_close($cURL);
-        if ($this->debug === true) {
-            $this->debugOuput($result);
+
+        list($header, $body) = explode("\r\n\r\n", $result, 2);
+        $this->checkHeaders($header);
+        
+        if (!is_dir(dirname(__FILE__).'/tmp')) {
+            mkdir(dirname(__FILE__).'/tmp');
         }
-        //if 401 rerun the call with non-token auth
+        file_put_contents(dirname(__FILE__).'/tmp/response_'.time(), $result);
+        
+        //if 401 throw exception
         if ((int) $info['http_code'] === 401) {
-            $result = $this->makeAPICall($url, $modified);
-            $this->token = base64_encode($info['Token']);
+            throw new \Exception('Could not authenticate with API Server.');
+        }
+        //if 304 not modified throw exception
+        if ((int) $info['http_code'] === 304) {
+            throw new \Exception('No new modifications found.');
         }
         //convert to XML document and return
-        return new \SimpleXMLElement($result);
+        return new \SimpleXMLElement(trim($body));
+    }
+
+    /**
+     * checks headers and saves token if needed
+     * 
+     * @param  string $headers response headers
+     * 
+     * @return void
+     */
+    private function checkHeaders($headers)
+    {
+        $headerArray = $this->getHeaders($headers);
+        foreach ($headerArray as $header => $value) {
+            if ($header == 'Token') {
+                $this->saveToken(trim($value));
+            }
+        }
+    }
+    /**
+     * Saves the token to file.
+     * 
+     * @return void
+     */
+    private function saveToken($token)
+    {
+        $_SESSION['token'] = base64_encode($token);
+        $_SESSION['token_expires'] = time() + (60 * 60);
+    }
+
+    /**
+     * gets the token
+     * 
+     * @return mixed
+     */
+    private function getToken()
+    {
+        $this->debugOuput($_SESSION);
+        if (!isset($_SESSION['token']) || time() > $_SESSION['token_expires']) {
+            return false;
+        }
+        return $_SESSION['token'];
+    }
+
+    /**
+     * substitue for http_parse_headers
+     * 
+     * @param  string $rawHeaders
+     * 
+     * @return array
+     */
+    private function getHeaders($rawHeaders)
+    {
+        $headers = array();
+        foreach (explode("\n", $rawHeaders) as $key => $head) {
+            $head = explode(':', $head, 2);
+            
+            if (isset($head[1])) {
+                $headers[$head[0]] = trim($head[1]);
+            }
+        }
+        return $headers;
     }
 
     /**
@@ -240,11 +318,13 @@ class Cfp
      */
     private function debugOuput($data, $end = false)
     {
-        echo "<pre>";
-        var_dump($data);
-        echo "</pre>";
-        if ($end) {
-            die("Debug: Terminated");
+        if ($this->debug === true) {
+            echo "<pre>";
+            var_dump($data);
+            echo "</pre>";
+            if ($end) {
+                die("Debug: Terminated");
+            }
         }
     }
 }
